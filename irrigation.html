@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Irrigazione Giardino</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root{ --bg:#0e1116; --card:#171c24; --line:#2a323d; --txt:#e7ecf2;
+         --muted:#8b97a6; --green:#3fb950; --blue:#2f81f7; --warn:#e3603a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--txt);
+        font-family:-apple-system,Segoe UI,Roboto,sans-serif; padding:14px; }
+  h1{ font-size:20px; margin:4px 0 2px; }
+  .sub{ color:var(--muted); font-size:13px; margin-bottom:14px; display:flex;
+        align-items:center; gap:8px; }
+  .dot{ width:9px; height:9px; border-radius:50%; background:var(--warn); }
+  .dot.ok{ background:var(--green); }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:12px;
+         padding:12px; margin-bottom:12px; }
+  .zone{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .zone .name{ font-weight:600; min-width:64px; }
+  .badge{ font-size:12px; padding:3px 8px; border-radius:20px; background:#222a34;
+          color:var(--muted); }
+  .badge.on{ background:rgba(63,185,80,.18); color:var(--green); }
+  input,button{ font:inherit; }
+  input[type=number]{ width:64px; background:#0e131a; color:var(--txt);
+       border:1px solid var(--line); border-radius:8px; padding:7px 8px; }
+  button{ border:0; border-radius:8px; padding:8px 12px; cursor:pointer;
+          color:#fff; font-weight:600; }
+  .b-go{ background:var(--green); } .b-stop{ background:#3a4250; }
+  .b-warn{ background:var(--warn); }
+  .hint{ color:var(--muted); font-size:12px; margin-top:8px; line-height:1.4; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th,td{ padding:6px 4px; border-bottom:1px solid var(--line); text-align:center; }
+  th{ color:var(--muted); font-weight:500; }
+  .days label{ display:inline-block; width:26px; font-size:11px; color:var(--muted);
+               text-align:center; cursor:pointer; }
+  .days input{ display:block; margin:0 auto; }
+  .b-ghost{ background:#222a34; color:var(--muted); font-weight:500; }
+  .b-blue{ background:var(--blue); }
+  .row-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+</style>
+</head>
+<body>
+
+<h1>Irrigazione Giardino</h1>
+<div class="sub"><span id="dot" class="dot"></span><span id="conn">connessione…</span></div>
+
+<div class="card" id="zones"></div>
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+  <button class="b-warn" onclick="offAll()">STOP TUTTO</button>
+  <span class="hint" style="margin:0">Avvio manuale: imposta i minuti e premi Avvia.
+   0 = resta aperta finché premi Stop.</span>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <strong>Calendario</strong>
+    <button class="b-ghost" onclick="addRow()">+ Riga</button>
+  </div>
+  <table id="sched">
+    <thead><tr><th>Zona</th><th>Giorni</th><th>Ora</th><th>Min.</th><th>On</th><th></th></tr></thead>
+    <tbody id="schedBody"></tbody>
+  </table>
+  <div class="row-actions">
+    <button class="b-blue" onclick="saveSchedule()">Salva programma</button>
+    <button class="b-ghost" onclick="cmd({action:'refresh'})">Ricarica</button>
+  </div>
+  <div class="hint">Il calendario viene salvato sull'ESP32 e gira da solo,
+   anche con telefono spento o internet assente.</div>
+</div>
+
+<script>
+// ======================= CONFIG (your HiveMQ data) =======================
+const MQTT_URL  = "wss://184a46dac2f14fb88fb93a2a9e01dd4f.s1.eu.hivemq.cloud:8884/mqtt";
+const MQTT_USER = "webapp";
+const MQTT_PASS = "6.Voltss";
+// ========================================================================
+
+const T_CMD = "irrigation/cmd";
+const T_STATUS = "irrigation/status";
+const T_SCHEDULE = "irrigation/schedule";
+
+// weekday bit order matches the firmware (tm_wday): 0=Sun,1=Mon,...6=Sat
+const DAYS = [["Lun",1],["Mar",2],["Mer",3],["Gio",4],["Ven",5],["Sab",6],["Dom",0]];
+
+let client, connected = false;
+
+function setConn(ok){
+  connected = ok;
+  document.getElementById("dot").className = "dot" + (ok ? " ok" : "");
+  document.getElementById("conn").textContent = ok ? "connesso al broker" : "non connesso";
+}
+
+function cmd(obj){
+  if(!connected){ alert("Non connesso al broker"); return; }
+  client.publish(T_CMD, JSON.stringify(obj));
+}
+
+function renderZones(status){
+  const c = document.getElementById("zones");
+  c.innerHTML = "";
+  for(let z=1; z<=4; z++){
+    const st = status ? status.zones.find(x=>x.z===z) : null;
+    const open = st ? st.open : false;
+    const rem  = st && st.remaining ? Math.ceil(st.remaining/60) : 0;
+    const div = document.createElement("div");
+    div.className = "zone";
+    div.style.marginBottom = z<4 ? "10px" : "0";
+    div.innerHTML = `
+      <span class="name">Zona ${z}</span>
+      <span class="badge ${open?'on':''}">${open ? (rem?('aperta · '+rem+'m'):'aperta') : 'chiusa'}</span>
+      <input type="number" id="min${z}" min="0" max="240" value="10">
+      <span style="color:var(--muted);font-size:12px">min</span>
+      <button class="b-go"   onclick="cmd({action:'on',zone:${z},minutes:+document.getElementById('min${z}').value})">Avvia</button>
+      <button class="b-stop" onclick="cmd({action:'off',zone:${z}})">Stop</button>`;
+    c.appendChild(div);
+  }
+}
+
+function offAll(){ cmd({action:"off_all"}); }
+
+function dayCheckboxes(dowMask){
+  return DAYS.map(([label,bit])=>{
+    const on = (dowMask & (1<<bit)) ? "checked" : "";
+    return `<label>${label}<input type="checkbox" data-bit="${bit}" ${on}></label>`;
+  }).join("");
+}
+
+function addRow(entry){
+  entry = entry || {zone:1,dow:62,hour:6,minute:30,duration:10,enabled:true};
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><select class="f-zone">
+      <option ${entry.zone==1?'selected':''}>1</option>
+      <option ${entry.zone==2?'selected':''}>2</option>
+      <option ${entry.zone==3?'selected':''}>3</option>
+      <option ${entry.zone==4?'selected':''}>4</option>
+    </select></td>
+    <td class="days f-days">${dayCheckboxes(entry.dow)}</td>
+    <td><input type="time" class="f-time"
+        value="${String(entry.hour).padStart(2,'0')}:${String(entry.minute).padStart(2,'0')}"></td>
+    <td><input type="number" class="f-dur" min="1" max="240" value="${entry.duration}" style="width:54px"></td>
+    <td><input type="checkbox" class="f-en" ${entry.enabled?'checked':''}></td>
+    <td><button class="b-ghost" onclick="this.closest('tr').remove()">✕</button></td>`;
+  document.getElementById("schedBody").appendChild(tr);
+}
+
+function renderSchedule(arr){
+  document.getElementById("schedBody").innerHTML = "";
+  (arr||[]).forEach(addRow);
+}
+
+function collectSchedule(){
+  const out = [];
+  document.querySelectorAll("#schedBody tr").forEach(tr=>{
+    let dow = 0;
+    tr.querySelectorAll(".f-days input:checked").forEach(cb=> dow |= (1 << +cb.dataset.bit));
+    const [h,m] = tr.querySelector(".f-time").value.split(":").map(Number);
+    out.push({
+      zone:+tr.querySelector(".f-zone").value, dow:dow,
+      hour:h||0, minute:m||0,
+      duration:+tr.querySelector(".f-dur").value||1,
+      enabled:tr.querySelector(".f-en").checked
+    });
+  });
+  return out;
+}
+
+function saveSchedule(){ cmd({action:"set_schedule", schedule: collectSchedule()}); }
+
+function connect(){
+  client = mqtt.connect(MQTT_URL, {
+    username: MQTT_USER, password: MQTT_PASS,
+    reconnectPeriod: 3000, clean: true
+  });
+  client.on("connect", ()=>{
+    setConn(true);
+    client.subscribe(T_STATUS);
+    client.subscribe(T_SCHEDULE);
+    cmd({action:"refresh"});
+  });
+  client.on("reconnect", ()=> setConn(false));
+  client.on("close",     ()=> setConn(false));
+  client.on("error",     (e)=>{ setConn(false); console.log(e); });
+  client.on("message", (topic, msg)=>{
+    try{
+      const data = JSON.parse(msg.toString());
+      if(topic === T_STATUS)   renderZones(data);
+      if(topic === T_SCHEDULE) renderSchedule(data);
+    }catch(e){}
+  });
+}
+
+renderZones(null);
+connect();
+</script>
+</body>
+</html>
