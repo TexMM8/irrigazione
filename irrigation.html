@@ -72,17 +72,6 @@
   <div class="hint">Avvio manuale: imposta i minuti e premi Avvia. 0 = resta aperta finché premi Stop.</div>
 </div>
 
-<!-- PAUSE / RESUME the calendar automation -->
-<div class="card">
-  <div class="pausebar">
-    <span>Automatismo calendario:</span>
-    <span id="pstate" class="pstate run">ATTIVO</span>
-    <button id="pbtn" class="b-orange" style="margin-left:auto" onclick="togglePause()">Pausa</button>
-  </div>
-  <div class="hint">Se piove e sei via: metti in <b>Pausa</b> e il calendario non parte.
-   Premi <b>Riparti</b> quando vuoi riattivarlo. I comandi manuali funzionano sempre.</div>
-</div>
-
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <strong>Calendario</strong>
@@ -97,6 +86,17 @@
     <button class="b-ghost" onclick="cmd({action:'refresh'})">Ricarica</button>
   </div>
   <div class="hint">Il calendario viene salvato sull'ESP32 e gira da solo, anche con telefono spento o internet assente.</div>
+</div>
+
+<!-- PAUSE / RESUME the calendar automation (below the calendar) -->
+<div class="card">
+  <div class="pausebar">
+    <span>Automatismo calendario:</span>
+    <span id="pstate" class="pstate run">ATTIVO</span>
+    <button id="pbtn" class="b-orange" style="margin-left:auto" onclick="togglePause()">Pausa</button>
+  </div>
+  <div class="hint">Se piove e sei via: metti in <b>Pausa</b> e il calendario non parte.
+   Premi <b>Riparti</b> quando vuoi riattivarlo. I comandi manuali funzionano sempre.</div>
 </div>
 
 <script>
@@ -173,7 +173,20 @@ function addRow(e){
     <td><button class="b-ghost" onclick="this.closest('tr').remove()">✕</button></td>`;
   document.getElementById("schedBody").appendChild(tr);
 }
-function renderSchedule(a){ document.getElementById("schedBody").innerHTML=""; (a||[]).forEach(addRow); }
+const DEFAULT_SCHEDULE=[
+  {zone:1,dow:127,hour:6,minute:0,duration:8,enabled:true},
+  {zone:1,dow:127,hour:20,minute:30,duration:8,enabled:true},
+  {zone:2,dow:127,hour:6,minute:0,duration:8,enabled:true},
+  {zone:3,dow:127,hour:6,minute:0,duration:10,enabled:true},
+  {zone:3,dow:127,hour:20,minute:30,duration:10,enabled:true},
+  {zone:4,dow:127,hour:6,minute:0,duration:15,enabled:true},
+  {zone:4,dow:127,hour:20,minute:30,duration:15,enabled:true},
+];
+function renderSchedule(a){
+  document.getElementById("schedBody").innerHTML="";
+  const list=(a && a.length)?a:DEFAULT_SCHEDULE;   // show defaults if ESP32 has none yet
+  list.forEach(addRow);
+}
 function collectSchedule(){
   const out=[];
   document.querySelectorAll("#schedBody tr").forEach(tr=>{
