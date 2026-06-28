@@ -90,11 +90,11 @@
 
 <!-- PAUSE / RESUME the calendar automation (below the calendar) -->
 <div class="card">
-  <div class="pausebar">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
     <span>Automatismo calendario:</span>
     <span id="pstate" class="pstate run">ATTIVO</span>
-    <button id="pbtn" class="b-orange" style="margin-left:auto" onclick="togglePause()">Pausa</button>
   </div>
+  <button id="pbtn" class="b-orange" style="width:100%" onclick="togglePause()">PAUSA</button>
   <div class="hint">Se piove e sei via: metti in <b>Pausa</b> e il calendario non parte.
    Premi <b>Riparti</b> quando vuoi riattivarlo. I comandi manuali funzionano sempre.</div>
 </div>
@@ -126,8 +126,8 @@ function togglePause(){ cmd({action: paused ? "resume" : "pause"}); }
 function setPaused(p){
   paused=p;
   const s=document.getElementById("pstate"), b=document.getElementById("pbtn");
-  if(p){ s.textContent="IN PAUSA"; s.className="pstate pause"; b.textContent="Riparti"; b.className="b-green"; }
-  else { s.textContent="ATTIVO";   s.className="pstate run";   b.textContent="Pausa";   b.className="b-orange"; }
+  if(p){ s.textContent="IN PAUSA"; s.className="pstate pause"; b.textContent="RIPARTI"; b.className="b-green"; }
+  else { s.textContent="ATTIVO";   s.className="pstate run";   b.textContent="PAUSA";   b.className="b-orange"; }
 }
 
 function renderZones(status){
