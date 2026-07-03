@@ -63,7 +63,15 @@
 <body>
 
 <h1>Irrigazione Giardino</h1>
-<div class="sub"><span id="dot" class="dot"></span><span id="conn">connessione…</span></div>
+<div class="sub">
+  <span id="dot" class="dot"></span><span id="conn">connessione…</span>
+  <span style="margin:0 6px;color:var(--line)">|</span>
+  <span id="dot2" class="dot"></span><span id="conn2">ESP32…</span>
+</div>
+<div id="toast" style="position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(30px);
+  background:#1f2a37;color:#e7ecf2;border:1px solid var(--line);border-radius:10px;
+  padding:10px 16px;font-size:14px;font-weight:600;opacity:0;transition:all .25s;
+  pointer-events:none;z-index:99;box-shadow:0 6px 20px rgba(0,0,0,.4)"></div>
 
 <div class="card" id="zones"></div>
 
@@ -110,6 +118,22 @@ const ZONE_NAMES = {1:"Winter garden", 2:"Garage", 3:"Gelsomini", 4:"Siepi + fon
 // =====================================================
 
 const T_CMD="irrigation/cmd", T_STATUS="irrigation/status", T_SCHEDULE="irrigation/schedule";
+const T_ONLINE="irrigation/online", T_ACK="irrigation/ack";
+let espTimer=null;
+
+function setEsp(online){
+  document.getElementById("dot2").className="dot"+(online?" ok":"");
+  document.getElementById("conn2").textContent=online?"ESP32 online":"ESP32 offline";
+}
+function toast(msg){
+  const t=document.getElementById("toast");
+  t.textContent=msg;
+  t.style.opacity="1"; t.style.transform="translateX(-50%) translateY(0)";
+  clearTimeout(t._h);
+  t._h=setTimeout(()=>{ t.style.opacity="0"; t.style.transform="translateX(-50%) translateY(30px)"; },1800);
+}
+const ACT_LABEL={on:"Avvio zona",off:"Stop zona",off_all:"Stop tutto",
+  pause:"Calendario in pausa",resume:"Calendario riattivato",set_schedule:"Programma salvato",refresh:"Aggiornato"};
 const DAYS=[["Lun",1],["Mar",2],["Mer",3],["Gio",4],["Ven",5],["Sab",6],["Dom",0]];
 
 let client, connected=false, paused=false;
@@ -201,13 +225,29 @@ function saveSchedule(){ cmd({action:"set_schedule",schedule:collectSchedule()})
 
 function connect(){
   client=mqtt.connect(MQTT_URL,{username:MQTT_USER,password:MQTT_PASS,reconnectPeriod:3000,clean:true});
-  client.on("connect",()=>{ setConn(true); client.subscribe(T_STATUS); client.subscribe(T_SCHEDULE); cmd({action:"refresh"}); });
+  client.on("connect",()=>{ setConn(true);
+    client.subscribe(T_STATUS); client.subscribe(T_SCHEDULE);
+    client.subscribe(T_ONLINE); client.subscribe(T_ACK);
+    cmd({action:"refresh"}); });
   client.on("reconnect",()=>setConn(false));
-  client.on("close",()=>setConn(false));
+  client.on("close",()=>{ setConn(false); setEsp(false); });
   client.on("error",e=>{ setConn(false); console.log(e); });
-  client.on("message",(t,msg)=>{ try{ const d=JSON.parse(msg.toString());
-    if(t===T_STATUS) renderZones(d); if(t===T_SCHEDULE) renderSchedule(d);
-  }catch(e){} });
+  client.on("message",(t,msg)=>{
+    const raw=msg.toString();
+    if(t===T_ONLINE){ setEsp(raw==="1"); return; }
+    if(t===T_ACK){ try{ const a=JSON.parse(raw);
+        let lbl=ACT_LABEL[a.ack]||"Comando ricevuto";
+        if(a.zone) lbl+=" "+a.zone;
+        toast("\u2713 "+lbl); }catch(e){ toast("\u2713 Comando ricevuto"); }
+      return; }
+    try{ const d=JSON.parse(raw);
+      if(t===T_STATUS){ renderZones(d);
+        // freshness watchdog: if no status update for 30s -> assume offline
+        clearTimeout(espTimer); espTimer=setTimeout(()=>setEsp(false),30000);
+      }
+      if(t===T_SCHEDULE) renderSchedule(d);
+    }catch(e){}
+  });
 }
 renderZones(null); connect();
 </script>
