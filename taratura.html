@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Taratura impulsi — irrigazione</title>
+<script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
+<style>
+  :root{
+    --bg:#0e1418; --panel:#151f25; --panel2:#1a262d; --line:#243239;
+    --ink:#e7eff3; --mut:#8aa0ab; --dim:#5f7480;
+    --water:#38cbd8; --amber:#e6a83c; --stop:#e0655c; --ok:#57c98a;
+    --z1:#e0655c; --z2:#dfe7ea; --z3:#57c98a; --z4:#4d90e6;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--mono);
+    font-size:15px; line-height:1.4;
+    padding:16px 14px calc(24px + env(safe-area-inset-bottom)); max-width:520px; margin:0 auto;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1{font-size:14px; letter-spacing:.14em; text-transform:uppercase; color:var(--mut); font-weight:600; margin:0 0 2px}
+  .sub{color:var(--dim); font-size:12px; margin:0 0 16px}
+
+  /* connection */
+  .conn{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:18px}
+  .row{display:flex; gap:8px; align-items:center}
+  .field{flex:1}
+  label{display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:0 0 3px}
+  input{
+    width:100%; background:var(--bg); border:1px solid var(--line); color:var(--ink);
+    font-family:var(--mono); font-size:15px; padding:9px 10px; border-radius:8px; outline:none;
+  }
+  input:focus{border-color:var(--water)}
+  .host{color:var(--mut); font-size:12px; word-break:break-all; margin-bottom:10px}
+  button{
+    font-family:var(--mono); font-size:13px; font-weight:600; letter-spacing:.02em;
+    border:1px solid var(--line); background:var(--panel2); color:var(--ink);
+    padding:9px 12px; border-radius:8px; cursor:pointer; -webkit-tap-highlight-color:transparent;
+  }
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.4; cursor:default}
+  .btn-conn{background:var(--water); color:#04252a; border-color:transparent; width:100%; margin-top:10px; padding:11px}
+  .btn-conn.on{background:transparent; color:var(--water); border-color:var(--water)}
+
+  .dot{width:9px; height:9px; border-radius:50%; background:var(--dim); flex:0 0 auto; box-shadow:0 0 0 0 transparent}
+  .dot.up{background:var(--ok); box-shadow:0 0 10px 1px rgba(87,201,138,.6)}
+  .dot.err{background:var(--stop)}
+  .status{font-size:12px; color:var(--mut); margin-left:2px}
+
+  /* zones */
+  .zone{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 12px 14px; margin-bottom:12px}
+  .zhead{display:flex; align-items:center; gap:9px; margin-bottom:12px}
+  .chip{width:12px; height:12px; border-radius:3px; flex:0 0 auto; border:1px solid rgba(255,255,255,.15)}
+  .zname{font-size:14px; font-weight:600}
+  .znum{margin-left:auto; font-size:11px; color:var(--dim); letter-spacing:.1em}
+
+  .inputs{display:flex; gap:10px; margin-bottom:10px}
+  .inputs .field input{text-align:center; font-size:17px; padding:10px}
+
+  .energy{font-size:11px; color:var(--dim); margin:0 0 12px; display:flex; justify-content:space-between; align-items:center}
+  .energy b{font-weight:600; color:var(--mut)}
+  .energy .warn{color:var(--amber)}
+  .energy .hot{color:var(--stop)}
+
+  .acts{display:grid; grid-template-columns:1fr 1fr auto; gap:8px}
+  .btn-open{background:var(--water); color:#04252a; border-color:transparent}
+  .btn-close{background:transparent; color:var(--mut); border-color:var(--line)}
+  .btn-save{background:transparent; color:var(--amber); border-color:var(--amber); padding-left:14px; padding-right:14px}
+
+  .saved{font-size:10px; color:var(--ok); margin-top:6px; height:12px; letter-spacing:.05em; opacity:0; transition:opacity .2s}
+  .saved.show{opacity:1}
+
+  /* log */
+  .log{background:#0a0f12; border:1px solid var(--line); border-radius:10px; padding:10px; margin-top:6px;
+       font-size:11px; color:var(--mut); height:130px; overflow:auto; white-space:pre-wrap}
+  .log .t{color:var(--dim)}
+  .log .ok{color:var(--ok)}
+  .log .err{color:var(--stop)}
+  .log .cmd{color:var(--water)}
+  .hint{font-size:11px; color:var(--dim); margin:14px 0 6px; line-height:1.5}
+  .hint b{color:var(--mut)}
+</style>
+</head>
+<body>
+  <h1>Taratura impulsi</h1>
+  <p class="sub">Banco di prova valvole latching · via MQTT</p>
+
+  <div class="conn">
+    <div class="host">184a46dac2f14fb88fb93a2a9e01dd4f.s1.eu.hivemq.cloud : 8884</div>
+    <div class="row" style="gap:10px">
+      <div class="field" style="max-width:120px">
+        <label>Utente</label>
+        <input id="user" value="webapp" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>Password broker</label>
+        <input id="pass" type="password" value="6.Voltss" autocomplete="off">
+      </div>
+    </div>
+    <button id="connect" class="btn-conn">Connetti</button>
+    <div class="row" style="margin-top:10px">
+      <span id="dot" class="dot"></span>
+      <span id="status" class="status">non connesso</span>
+    </div>
+  </div>
+
+  <div id="zones"></div>
+
+  <div class="hint">
+    <b>Apri (test)</b> usa questi valori solo per lo sparo — non li salva.<br>
+    <b>Salva default</b> li scrive nella ESP32 (restano dopo il riavvio).<br>
+    Cerca il <b>minimo</b> che apre in modo affidabile, non il massimo.
+  </div>
+  <div id="log" class="log"></div>
+
+<script>
+const HOST = "184a46dac2f14fb88fb93a2a9e01dd4f.s1.eu.hivemq.cloud";
+const PORT = 8884;
+const T_CMD="irrigation/cmd", T_PULSE="irrigation/pulse", T_ACK="irrigation/ack", T_STATUS="irrigation/status";
+
+const ZONES = [
+  {n:1, name:"Winter garden",   color:"var(--z1)"},
+  {n:2, name:"Garage",          color:"var(--z2)"},
+  {n:3, name:"Gelsomini",       color:"var(--z3)"},
+  {n:4, name:"Siepi + fontana", color:"var(--z4)"},
+];
+
+let client=null, connected=false;
+const $=id=>document.getElementById(id);
+const logEl=$("log");
+
+function log(msg, cls=""){
+  const t=new Date().toLocaleTimeString("it-IT");
+  const line=document.createElement("div");
+  line.innerHTML=`<span class="t">${t}</span>  <span class="${cls}">${msg}</span>`;
+  logEl.appendChild(line);
+  logEl.scrollTop=logEl.scrollHeight;
+  while(logEl.childNodes.length>120) logEl.removeChild(logEl.firstChild);
+}
+
+// build zone cards
+$("zones").innerHTML = ZONES.map(z=>`
+  <div class="zone" data-z="${z.n}">
+    <div class="zhead">
+      <span class="chip" style="background:${z.color}"></span>
+      <span class="zname">${z.name}</span>
+      <span class="znum">ZONA ${z.n}</span>
+    </div>
+    <div class="inputs">
+      <div class="field">
+        <label>Impulso (ms)</label>
+        <input class="ms" type="number" inputmode="numeric" min="20" max="4000" step="10" value="300">
+      </div>
+      <div class="field">
+        <label>Ripetizioni</label>
+        <input class="rep" type="number" inputmode="numeric" min="1" max="12" step="1" value="3">
+      </div>
+    </div>
+    <div class="energy">
+      <span>bobina totale: <b class="tot">—</b></span>
+      <span class="note"></span>
+    </div>
+    <div class="acts">
+      <button class="btn-open">Apri (test)</button>
+      <button class="btn-close">Chiudi</button>
+      <button class="btn-save">Salva</button>
+    </div>
+    <div class="saved">salvato sulla ESP32</div>
+  </div>
+`).join("");
+
+function card(n){ return document.querySelector(`.zone[data-z="${n}"]`); }
+function vals(n){
+  const c=card(n);
+  let ms=parseInt(c.querySelector(".ms").value)||0;
+  let rep=parseInt(c.querySelector(".rep").value)||0;
+  return {ms,rep,c};
+}
+
+// live "coil time" readout — the whole point: too much = heat, not more opening
+function refreshEnergy(n){
+  const {ms,rep,c}=vals(n);
+  const tot=ms*rep;
+  const totEl=c.querySelector(".tot");
+  const note=c.querySelector(".note");
+  totEl.textContent = tot? `${tot} ms  (${ms}×${rep})` : "—";
+  totEl.className="tot";
+  note.className="note"; note.textContent="";
+  if(tot>=3000){ totEl.classList.add("hot"); note.classList.add("hot"); note.textContent="troppo · rischio surriscaldo DRV"; }
+  else if(tot>=1500){ totEl.classList.add("warn"); note.classList.add("warn"); note.textContent="alto · più tempo ≠ più apertura"; }
+  else if(tot>0){ note.textContent="ok"; }
+}
+ZONES.forEach(z=>{
+  const c=card(z.n);
+  c.querySelector(".ms").addEventListener("input",()=>refreshEnergy(z.n));
+  c.querySelector(".rep").addEventListener("input",()=>refreshEnergy(z.n));
+  refreshEnergy(z.n);
+});
+
+function send(obj, label){
+  if(!connected){ log("non connesso — impossibile inviare","err"); return; }
+  client.publish(T_CMD, JSON.stringify(obj));
+  log(label+"  →  "+JSON.stringify(obj), "cmd");
+}
+
+// zone buttons
+ZONES.forEach(z=>{
+  const c=card(z.n);
+  c.querySelector(".btn-open").addEventListener("click",()=>{
+    const {ms,rep}=vals(z.n);
+    send({action:"on", zone:z.n, minutes:0, ms, repeat:rep}, `apri Z${z.n} (test)`);
+  });
+  c.querySelector(".btn-close").addEventListener("click",()=>{
+    send({action:"off", zone:z.n}, `chiudi Z${z.n}`);
+  });
+  c.querySelector(".btn-save").addEventListener("click",()=>{
+    const {ms,rep}=vals(z.n);
+    send({action:"set_pulse", zone:z.n, ms, repeat:rep}, `salva default Z${z.n}`);
+    const s=c.querySelector(".saved"); s.classList.add("show");
+    setTimeout(()=>s.classList.remove("show"),1600);
+  });
+});
+
+// apply stored config coming from the ESP32 (retained irrigation/pulse)
+function applyPulse(p){
+  if(!p||!Array.isArray(p.ms)||!Array.isArray(p.repeat)) return;
+  ZONES.forEach((z,i)=>{
+    const c=card(z.n);
+    const msI=c.querySelector(".ms"), repI=c.querySelector(".rep");
+    if(document.activeElement!==msI && p.ms[i]!=null) msI.value=p.ms[i];
+    if(document.activeElement!==repI && p.repeat[i]!=null) repI.value=p.repeat[i];
+    refreshEnergy(z.n);
+  });
+  log("config attuale caricata dalla ESP32","ok");
+}
+
+// connection
+function setStatus(txt, cls){
+  $("status").textContent=txt;
+  const d=$("dot"); d.className="dot"+(cls?(" "+cls):"");
+}
+function connect(){
+  const pass=$("pass").value.trim();
+  const user=$("user").value.trim()||"webapp";
+  if(!pass){ log("inserisci la password del broker","err"); return; }
+  setStatus("connessione…","");
+  log("connessione a "+HOST+" …");
+  const url=`wss://${HOST}:${PORT}/mqtt`;
+  client=mqtt.connect(url,{
+    username:user, password:pass,
+    clientId:"tuner-"+Math.random().toString(16).slice(2,8),
+    clean:true, connectTimeout:8000, reconnectPeriod:3000, protocolVersion:4
+  });
+  client.on("connect",()=>{
+    connected=true;
+    setStatus("connesso","up");
+    $("connect").textContent="Disconnetti"; $("connect").classList.add("on");
+    log("connesso","ok");
+    client.subscribe([T_PULSE,T_ACK,T_STATUS]);
+  });
+  client.on("message",(topic,payload)=>{
+    let s=payload.toString();
+    if(topic===T_PULSE){ try{ applyPulse(JSON.parse(s)); }catch(e){} }
+    else if(topic===T_ACK){ log("ack ← "+s,"ok"); }
+    else if(topic===T_STATUS){
+      try{ const d=JSON.parse(s);
+        const open=(d.zones||[]).filter(z=>z.open).map(z=>"Z"+z.z);
+        log("stato ← aperte: "+(open.length?open.join(" "):"nessuna"));
+      }catch(e){}
+    }
+  });
+  client.on("error",(e)=>{ setStatus("errore","err"); log("errore: "+(e&&e.message||e),"err"); });
+  client.on("close",()=>{ if(connected){ log("connessione chiusa"); } connected=false;
+    setStatus("non connesso",""); $("connect").textContent="Connetti"; $("connect").classList.remove("on"); });
+}
+function disconnect(){ if(client){ client.end(true); } connected=false;
+  setStatus("non connesso",""); $("connect").textContent="Connetti"; $("connect").classList.remove("on"); log("disconnesso"); }
+
+$("connect").addEventListener("click",()=> connected?disconnect():connect());
+$("pass").addEventListener("keydown",e=>{ if(e.key==="Enter"&&!connected) connect(); });
+
+log("pronto.");
+// auto-connessione all'apertura, come fa irrigation.html
+if($("pass").value.trim()) connect();
+</script>
+</body>
+</html>
