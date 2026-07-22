@@ -106,6 +106,10 @@
       <span id="dot" class="dot"></span>
       <span id="status" class="status">non connesso</span>
     </div>
+    <div class="row" style="margin-top:8px">
+      <span id="dot2" class="dot"></span>
+      <span id="status2" class="status">ESP32 —</span>
+    </div>
   </div>
 
   <div id="zones"></div>
@@ -120,7 +124,8 @@
 <script>
 const HOST = "184a46dac2f14fb88fb93a2a9e01dd4f.s1.eu.hivemq.cloud";
 const PORT = 8884;
-const T_CMD="irrigation/cmd", T_PULSE="irrigation/pulse", T_ACK="irrigation/ack", T_STATUS="irrigation/status";
+const T_CMD="irrigation/cmd", T_PULSE="irrigation/pulse", T_ACK="irrigation/ack", T_STATUS="irrigation/status", T_ONLINE="irrigation/online";
+let espTimer=null;
 
 const ZONES = [
   {n:1, name:"Winter garden",   color:"var(--z1)"},
@@ -259,6 +264,10 @@ function setStatus(txt, cls){
   $("status").textContent=txt;
   const d=$("dot"); d.className="dot"+(cls?(" "+cls):"");
 }
+function setEsp(online){
+  $("dot2").className="dot"+(online?" up":" err");
+  $("status2").textContent=online?"ESP32 online":"ESP32 offline";
+}
 function connect(){
   const pass=$("pass").value.trim();
   const user=$("user").value.trim()||"webapp";
@@ -276,13 +285,16 @@ function connect(){
     setStatus("connesso","up");
     $("connect").textContent="Disconnetti"; $("connect").classList.add("on");
     log("connesso","ok");
-    client.subscribe([T_PULSE,T_ACK,T_STATUS]);
+    client.subscribe([T_PULSE,T_ACK,T_STATUS,T_ONLINE]);
   });
   client.on("message",(topic,payload)=>{
     let s=payload.toString();
+    if(topic===T_ONLINE){ setEsp(s==="1"); return; }
     if(topic===T_PULSE){ try{ applyPulse(JSON.parse(s)); }catch(e){} }
     else if(topic===T_ACK){ log("ack ← "+s,"ok"); }
     else if(topic===T_STATUS){
+      setEsp(true);                                   // any status = ESP32 alive
+      clearTimeout(espTimer); espTimer=setTimeout(()=>setEsp(false),30000);
       try{ const d=JSON.parse(s);
         const open=(d.zones||[]).filter(z=>z.open).map(z=>"Z"+z.z);
         log("stato ← aperte: "+(open.length?open.join(" "):"nessuna"));
@@ -290,10 +302,10 @@ function connect(){
     }
   });
   client.on("error",(e)=>{ setStatus("errore","err"); log("errore: "+(e&&e.message||e),"err"); });
-  client.on("close",()=>{ if(connected){ log("connessione chiusa"); } connected=false;
+  client.on("close",()=>{ if(connected){ log("connessione chiusa"); } connected=false; setEsp(false);
     setStatus("non connesso",""); $("connect").textContent="Connetti"; $("connect").classList.remove("on"); });
 }
-function disconnect(){ if(client){ client.end(true); } connected=false;
+function disconnect(){ if(client){ client.end(true); } connected=false; setEsp(false);
   setStatus("non connesso",""); $("connect").textContent="Connetti"; $("connect").classList.remove("on"); log("disconnesso"); }
 
 $("connect").addEventListener("click",()=> connected?disconnect():connect());
