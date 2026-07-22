@@ -61,6 +61,7 @@
   .inputs .field input{text-align:center; font-size:17px; padding:10px}
 
   .energy{font-size:11px; color:var(--dim); margin:0 0 12px; display:flex; justify-content:space-between; align-items:center}
+  .subhint{font-size:11px; color:var(--dim); margin:0 0 10px; line-height:1.4}
   .energy b{font-weight:600; color:var(--mut)}
   .energy .warn{color:var(--amber)}
   .energy .hot{color:var(--stop)}
@@ -155,10 +156,21 @@ $("zones").innerHTML = ZONES.map(z=>`
         <input class="ms" type="number" inputmode="numeric" min="20" max="4000" step="10" value="300">
       </div>
       <div class="field">
-        <label>Ripetizioni</label>
+        <label>Rip. interne</label>
         <input class="rep" type="number" inputmode="numeric" min="1" max="12" step="1" value="3">
       </div>
     </div>
+    <div class="inputs">
+      <div class="field">
+        <label>Spari (tot)</label>
+        <input class="att" type="number" inputmode="numeric" min="1" max="6" step="1" value="3">
+      </div>
+      <div class="field">
+        <label>Intervallo (s)</label>
+        <input class="gap" type="number" inputmode="numeric" min="1" max="120" step="1" value="20">
+      </div>
+    </div>
+    <div class="subhint">Spari = quante volte ripete l'apertura, a distanza di X secondi. 3 = come ora.</div>
     <div class="energy">
       <span>bobina totale: <b class="tot">—</b></span>
       <span class="note"></span>
@@ -177,7 +189,9 @@ function vals(n){
   const c=card(n);
   let ms=parseInt(c.querySelector(".ms").value)||0;
   let rep=parseInt(c.querySelector(".rep").value)||0;
-  return {ms,rep,c};
+  let att=parseInt(c.querySelector(".att").value)||1;
+  let gap=parseInt(c.querySelector(".gap").value)||1;
+  return {ms,rep,att,gap,c};
 }
 
 // live "coil time" readout — the whole point: too much = heat, not more opening
@@ -210,15 +224,15 @@ function send(obj, label){
 ZONES.forEach(z=>{
   const c=card(z.n);
   c.querySelector(".btn-open").addEventListener("click",()=>{
-    const {ms,rep}=vals(z.n);
-    send({action:"on", zone:z.n, minutes:0, ms, repeat:rep}, `apri Z${z.n} (test)`);
+    const {ms,rep,att,gap}=vals(z.n);
+    send({action:"on", zone:z.n, minutes:0, ms, repeat:rep, attempts:att, gap}, `apri Z${z.n} (test)`);
   });
   c.querySelector(".btn-close").addEventListener("click",()=>{
     send({action:"off", zone:z.n}, `chiudi Z${z.n}`);
   });
   c.querySelector(".btn-save").addEventListener("click",()=>{
-    const {ms,rep}=vals(z.n);
-    send({action:"set_pulse", zone:z.n, ms, repeat:rep}, `salva default Z${z.n}`);
+    const {ms,rep,att,gap}=vals(z.n);
+    send({action:"set_pulse", zone:z.n, ms, repeat:rep, attempts:att, gap}, `salva default Z${z.n}`);
     const s=c.querySelector(".saved"); s.classList.add("show");
     setTimeout(()=>s.classList.remove("show"),1600);
   });
@@ -230,8 +244,11 @@ function applyPulse(p){
   ZONES.forEach((z,i)=>{
     const c=card(z.n);
     const msI=c.querySelector(".ms"), repI=c.querySelector(".rep");
+    const attI=c.querySelector(".att"), gapI=c.querySelector(".gap");
     if(document.activeElement!==msI && p.ms[i]!=null) msI.value=p.ms[i];
     if(document.activeElement!==repI && p.repeat[i]!=null) repI.value=p.repeat[i];
+    if(document.activeElement!==attI && Array.isArray(p.attempts) && p.attempts[i]!=null) attI.value=p.attempts[i];
+    if(document.activeElement!==gapI && Array.isArray(p.gap) && p.gap[i]!=null) gapI.value=p.gap[i];
     refreshEnergy(z.n);
   });
   log("config attuale caricata dalla ESP32","ok");
