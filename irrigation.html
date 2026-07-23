@@ -58,6 +58,18 @@
                text-align:center; cursor:pointer; }
   .days input{ display:block; margin:2px auto 0; }
   .row-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  /* --- riquadro orologio / sincronizzazione --- */
+  .crow{ display:flex; justify-content:space-between; align-items:baseline;
+         padding:5px 0; font-size:13px; }
+  .clabel{ color:var(--muted); }
+  .cval{ font-variant-numeric:tabular-nums; font-weight:600; }
+  .cval.big{ font-size:19px; letter-spacing:.5px; }
+  .cval.warn{ color:var(--orange); }
+  .cval.bad{ color:var(--red); }
+  .cval.good{ color:var(--green); }
+  .cnote{ font-size:12px; margin-top:8px; line-height:1.4; color:var(--muted); }
+  .cnote.warn{ color:var(--orange); }
+  .cnote.bad{ color:var(--red); }
 </style>
 </head>
 <body>
@@ -72,6 +84,26 @@
   background:#1f2a37;color:#e7ecf2;border:1px solid var(--line);border-radius:10px;
   padding:10px 16px;font-size:14px;font-weight:600;opacity:0;transition:all .25s;
   pointer-events:none;z-index:99;box-shadow:0 6px 20px rgba(0,0,0,.4)"></div>
+
+<div class="card" id="clockcard">
+  <div class="crow">
+    <span class="clabel">Ora ESP32</span>
+    <span class="cval big" id="espTime">--:--:--</span>
+  </div>
+  <div class="crow">
+    <span class="clabel">Scarto vs telefono</span>
+    <span class="cval" id="espDelta">—</span>
+  </div>
+  <div class="crow">
+    <span class="clabel">Ultima sync internet</span>
+    <span class="cval" id="espSync">—</span>
+  </div>
+  <div class="crow">
+    <span class="clabel">Acceso da</span>
+    <span class="cval" id="espUp">—</span>
+  </div>
+  <div class="cnote" id="clockNote">in attesa di dati dalla centralina…</div>
+</div>
 
 <div class="card" id="zones"></div>
 
@@ -125,6 +157,83 @@ function setEsp(online){
   document.getElementById("dot2").className="dot"+(online?" ok":"");
   document.getElementById("conn2").textContent=online?"ESP32 online":"ESP32 offline";
 }
+// ---------------- orologio ESP32 ----------------
+// L'ESP32 pubblica la SUA ora: qui la mostriamo e la facciamo avanzare in locale
+// tra un messaggio e l'altro. Serve a vedere da lontano se e' regolata.
+const clk={ have:false, epoch:0, at:0, synced:false, syncAge:0,
+            uptime:0, boot:0, delta:0, live:false };
+
+function fmtDur(s){
+  s=Math.max(0,Math.floor(s));
+  const g=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60);
+  if(g) return g+"g "+h+"h";
+  if(h) return h+"h "+m+"m";
+  if(m) return m+"m";
+  return s+"s";
+}
+function updateClock(d){
+  if(typeof d.epoch==="number" && d.epoch>1700000000){
+    clk.have=true; clk.epoch=d.epoch; clk.at=Date.now();
+    clk.delta=d.epoch-Math.round(Date.now()/1000);
+  }
+  if(typeof d.synced==="boolean") clk.synced=d.synced;
+  if(typeof d.sync_age==="number") { clk.syncAge=d.sync_age; clk.at2=Date.now(); }
+  if(typeof d.uptime==="number")   clk.uptime=d.uptime;
+  if(typeof d.boot==="number")     clk.boot=d.boot;
+  clk.live=true;
+  renderClock();
+}
+function renderClock(){
+  const $t=document.getElementById("espTime"), $d=document.getElementById("espDelta"),
+        $s=document.getElementById("espSync"), $u=document.getElementById("espUp"),
+        $n=document.getElementById("clockNote");
+  if(!clk.have){
+    $t.textContent="--:--:--"; $t.className="cval big";
+    $n.textContent="in attesa di dati dalla centralina…"; $n.className="cnote";
+    return;
+  }
+  const el=Math.floor((Date.now()-clk.at)/1000);           // secondi passati in locale
+  const now=new Date((clk.epoch+el)*1000);
+  $t.textContent=now.toLocaleTimeString("it-IT");
+  $t.className="cval big"+(clk.live?"":" warn");
+
+  const dd=clk.delta;
+  $d.textContent=(dd>0?"+":"")+dd+" s";
+  $d.className="cval"+(Math.abs(dd)>60?" bad":(Math.abs(dd)>5?" warn":" good"));
+
+  const age=clk.syncAge+Math.floor((Date.now()-(clk.at2||clk.at))/1000);
+  $s.textContent=clk.synced?(fmtDur(age)+" fa"):"mai";
+  $s.className="cval"+(!clk.synced?" bad":(age>7800?" warn":" good"));
+
+  const up=clk.uptime+el;
+  let upTxt=fmtDur(up);
+  if(clk.boot>1700000000)
+    upTxt+="  ·  dal "+new Date(clk.boot*1000).toLocaleString("it-IT",
+      {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+  $u.textContent=upTxt; $u.className="cval";
+
+  if(!clk.live){
+    $n.textContent="Dati non aggiornati: la centralina non risponde. L'ora mostrata è l'ultima ricevuta.";
+    $n.className="cnote bad";
+  } else if(!clk.synced){
+    $n.textContent="⚠ Orologio MAI sincronizzato dall'accensione: il calendario NON parte finché non trova internet almeno una volta.";
+    $n.className="cnote bad";
+  } else if(up<900){
+    $n.textContent="⚠ Acceso da poco: probabile riavvio o caduta di corrente recente.";
+    $n.className="cnote warn";
+  } else if(age>7800){
+    $n.textContent="Internet assente da un po': l'irrigazione parte comunque con l'orologio interno.";
+    $n.className="cnote warn";
+  } else if(Math.abs(dd)>60){
+    $n.textContent="⚠ Orologio ESP32 sfasato rispetto al telefono: controlla la sincronizzazione.";
+    $n.className="cnote warn";
+  } else {
+    $n.textContent="Orologio regolato. Apertura e chiusura usano sempre l'orologio interno: se manca internet, partono lo stesso.";
+    $n.className="cnote";
+  }
+}
+setInterval(renderClock,1000);
+
 function toast(msg){
   const t=document.getElementById("toast");
   t.textContent=msg;
@@ -230,20 +339,23 @@ function connect(){
     client.subscribe(T_ONLINE); client.subscribe(T_ACK);
     cmd({action:"refresh"}); });
   client.on("reconnect",()=>setConn(false));
-  client.on("close",()=>{ setConn(false); setEsp(false); });
+  client.on("close",()=>{ setConn(false); setEsp(false); clk.live=false; renderClock(); });
   client.on("error",e=>{ setConn(false); console.log(e); });
   client.on("message",(t,msg)=>{
     const raw=msg.toString();
-    if(t===T_ONLINE){ setEsp(raw==="1"); return; }
+    if(t===T_ONLINE){ setEsp(raw==="1");
+      if(raw!=="1"){ clk.live=false; renderClock(); }
+      return; }
     if(t===T_ACK){ try{ const a=JSON.parse(raw);
         let lbl=ACT_LABEL[a.ack]||"Comando ricevuto";
         if(a.zone) lbl+=" "+a.zone;
         toast("\u2713 "+lbl); }catch(e){ toast("\u2713 Comando ricevuto"); }
       return; }
     try{ const d=JSON.parse(raw);
-      if(t===T_STATUS){ renderZones(d);
-        // freshness watchdog: if no status update for 30s -> assume offline
-        clearTimeout(espTimer); espTimer=setTimeout(()=>setEsp(false),30000);
+      if(t===T_STATUS){ renderZones(d); updateClock(d); setEsp(true);
+        // freshness watchdog: lo stato arriva ogni 20s -> 60s senza nulla = offline
+        clearTimeout(espTimer);
+        espTimer=setTimeout(()=>{ setEsp(false); clk.live=false; renderClock(); },60000);
       }
       if(t===T_SCHEDULE) renderSchedule(d);
     }catch(e){}
